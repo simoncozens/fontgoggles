@@ -5,7 +5,7 @@ import itertools
 from fontTools.ttLib import TTFont
 from fontTools.unicodedata import ot_tag_to_script
 import uharfbuzz as hb
-
+import re
 
 class GlyphInfo:
 
@@ -148,6 +148,23 @@ class HBShape:
         except KeyError:
             return default
 
+    def buildMessageHistoryFunction(self, buf):
+        lastmessage = []
+        resultlist = []
+        def handle_message(msg):
+            nonlocal resultlist
+            nonlocal lastmessage
+            msg = msg.decode("utf8")
+            if msg.startswith("start"):
+                lastmessage = tuple([g.codepoint for g in buf.glyph_infos])
+            if msg.startswith("end"):
+                lookup = re.findall("(\d+)", msg)
+                thismessage = tuple([g.codepoint for g in buf.glyph_infos])
+                if lastmessage != thismessage:
+                    glyphlist = [self.glyphOrder[g.codepoint] for g in buf.glyph_infos]
+                    resultlist.append("After lookup %i: %s" % (int(lookup[0]), "|".join(glyphlist)))
+        return handle_message, resultlist
+
     def shape(self, text, *, features=None, varLocation=None,
               direction=None, language=None, script=None):
         if features is None:
@@ -166,6 +183,8 @@ class HBShape:
         buf = hb.Buffer.create()
         buf.add_str(str(text))  # add_str() does not accept str subclasses
         buf.guess_segment_properties()
+        msgfunc, history = self.buildMessageHistoryFunction(buf)
+        buf.set_message_func(msgfunc)
 
         if direction is not None:
             buf.direction = direction
@@ -183,7 +202,7 @@ class HBShape:
         for info, pos in zip(buf.glyph_infos, buf.glyph_positions):
             infos.append(GlyphInfo(info.codepoint, glyphOrder[info.codepoint], info.cluster, *pos.position))
 
-        return infos
+        return infos, history
 
 
 def characterGlyphMapping(clusters, numChars):
